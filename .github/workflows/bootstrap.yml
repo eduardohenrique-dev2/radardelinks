@@ -19,6 +19,7 @@ jobs:
         run: |
           base64 --decode .radar-source-package.b64 | tar -xJf -
           rm .radar-source-package.b64
+          rm -f .github/workflows/ci.yml
       - name: Commit all source files
         run: |
           git config user.name "github-actions[bot]"
