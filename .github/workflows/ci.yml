@@ -27,3 +27,41 @@ jobs:
           node-version: '22'
       - run: npm install --no-audit --no-fund
       - run: npm run build
+
+  container:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production image
+        run: docker build -t radar-grupos:ci .
+      - name: Start application in Docker
+        run: |
+          docker run -d --name radar-smoke -p 127.0.0.1:18889:8000 \
+            -e ADMIN_USERNAME=admin \
+            -e ADMIN_PASSWORD=ci-only-test-password \
+            -e SECRET_KEY=ci-only-test-signing-key-with-at-least-32-characters \
+            radar-grupos:ci
+      - name: Smoke test frontend and API
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:18889/api/health; then break; fi
+            sleep 2
+          done
+          curl -fsS http://127.0.0.1:18889/ | grep -q "Radar de Grupos"
+          python3 - <<'PY'
+          import urllib.request, json, http.cookiejar
+          opener=urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+          payload=json.dumps({'username':'admin','password':'ci-only-test-password'}).encode()
+          req=urllib.request.Request('http://127.0.0.1:18889/api/auth/login',data=payload,headers={'Content-Type':'application/json'})
+          data=json.load(opener.open(req))
+          assert data['csrf']
+          with opener.open('http://127.0.0.1:18889/api/dashboard') as r:
+              assert r.status==200
+          print('API, frontend e autenticação funcionando no container')
+          PY
+      - name: Show logs on failure
+        if: failure()
+        run: docker logs radar-smoke
+      - name: Stop test container
+        if: always()
+        run: docker rm -f radar-smoke || true
